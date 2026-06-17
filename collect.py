@@ -160,7 +160,11 @@ def upsert(university: dict, items: list[dict], festivals: list[dict]):
         }
         try:
             sb_upsert("festivals", row, on_conflict="scraped_hash")
-            print(f"    saved: {festival.get('festival_name') or '(이름미상)'} ({festival['date_start']}, {row['semester']})")
+            date_range = festival["date_start"]
+            if festival.get("date_end"):
+                date_range += f" ~ {festival['date_end']}"
+            lineup_str = ", ".join(festival.get("lineup") or []) or "미확인"
+            print(f"    {date_range} | 라인업: {lineup_str}")
         except Exception as e:
             print(f"    DB error: {e}")
 

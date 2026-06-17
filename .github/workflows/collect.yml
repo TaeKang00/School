@@ -24,19 +24,5 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Debug secrets
-        run: |
-          echo "SUPABASE_URL set: ${{ secrets.SUPABASE_URL != '' }}"
-          echo "SUPABASE_SERVICE_KEY set: ${{ secrets.SUPABASE_SERVICE_KEY != '' }}"
-          echo "GEMINI_API_KEY set: ${{ secrets.GEMINI_API_KEY != '' }}"
-          echo "NAVER_CLIENT_ID set: ${{ secrets.NAVER_CLIENT_ID != '' }}"
-          echo "NAVER_CLIENT_SECRET set: ${{ secrets.NAVER_CLIENT_SECRET != '' }}"
-
       - name: Run collector
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
-          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
         run: python collect.py

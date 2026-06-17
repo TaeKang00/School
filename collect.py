@@ -8,11 +8,11 @@ import feedparser
 from supabase import create_client, Client
 import google.generativeai as genai
 
-SUPABASE_URL = os.environ["SUPABASE_URL"]
-SUPABASE_SERVICE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
-GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
-NAVER_CLIENT_ID = os.environ["NAVER_CLIENT_ID"]
-NAVER_CLIENT_SECRET = os.environ["NAVER_CLIENT_SECRET"]
+SUPABASE_URL = "https://kxtyoopunnwxjhvtxbca.supabase.co"
+SUPABASE_SERVICE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt4dHlvb3B1bm53eGpodnR4YmNhIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3ODMyNjg3NSwiZXhwIjoyMDkzOTAyODc1fQ.-KK3F_62XnVI1Fl_VpSK5oI5irMznZu4sdaXkFPZ_f8"
+GEMINI_API_KEY = "AIzaSyCfMmaJ7k58qtgwCUZiSo83EHI26VYGTCA"
+NAVER_CLIENT_ID = "ZMCGvUd9yOl8MTAOpE7n"
+NAVER_CLIENT_SECRET = "XskOZ3kD5L"
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 genai.configure(api_key=GEMINI_API_KEY)

@@ -42,7 +42,8 @@ EXTRACT_PROMPT = """\
 
 추출 규칙:
 - 날짜는 반드시 YYYY-MM-DD 형식. "5월 14일" → "2026-05-14"
-- 날짜 범위가 언급되면 date_start/date_end 모두 채울 것
+- date_start와 date_end 모두 필수. 종료일 모르면 해당 항목 제외할 것
+- 예: "5월 14일~16일" → date_start:"2026-05-14", date_end:"2026-05-16"
 - 라인업은 실제 공연 아티스트 이름만. 사회자/MC 제외
 - confidence: 날짜+라인업 모두 확실하면 0.9, 하나만 있으면 0.6, 둘 다 불확실하면 0.3
 - 같은 축제가 여러 항목에 나오면 가장 정보가 많은 항목의 source_index 사용
@@ -144,6 +145,10 @@ def _parse_festivals(raw: str) -> list[dict]:
 
         # confidence 임계값 미만 버림
         if r.get("confidence", 0) < CONFIDENCE_THRESHOLD:
+            continue
+
+        # date_end 없으면 버림 (날짜 범위 필수)
+        if not r.get("date_end"):
             continue
 
         # 날짜도 없고 라인업도 없으면 버림

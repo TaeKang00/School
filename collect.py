@@ -23,6 +23,8 @@ SB_HEADERS = {
     "Content-Type": "application/json",
 }
 
+TARGET_SEMESTER = "2026-1"  # 수집 대상 학기
+
 EXTRACT_PROMPT = """\
 한국 대학교 축제 뉴스/게시물입니다.
 대학교: {university_name}
@@ -30,8 +32,8 @@ EXTRACT_PROMPT = """\
 내용:
 {content}
 
-위 내용에서 축제 정보를 추출해 JSON으로만 반환하세요.
-축제 관련 내용이 없으면 null을 반환하세요.
+위 내용에서 2026년 1학기(1~6월) 축제 정보를 추출해 JSON으로만 반환하세요.
+이미 지난 축제도 포함합니다. 2026년 1학기 축제가 아니거나 날짜를 알 수 없으면 null을 반환하세요.
 
 반환 형식 (JSON만, 마크다운 코드블록 없이):
 {{
@@ -95,7 +97,11 @@ def analyze(university_name: str, content: str) -> dict | None:
         if raw == "null":
             return None
         data = json.loads(raw)
-        return data if data.get("date_start") else None
+        if not data.get("date_start"):
+            return None
+        if to_semester(data["date_start"]) != TARGET_SEMESTER:
+            return None
+        return data
     except Exception as e:
         print(f"    Gemini error: {e}")
         return None
@@ -139,7 +145,8 @@ def process(university: dict):
     print(f"\n[{name}]")
     seen: set[str] = set()
 
-    for query in [f"{name} 축제", f"{name} 축제 라인업", f"{name} 대동제"]:
+    year = TARGET_SEMESTER.split("-")[0]
+    for query in [f"{name} {year} 축제", f"{name} {year} 대동제", f"{name} {year} 축제 라인업"]:
         for item in naver_news(query):
             url = item.get("link", "")
             if not url or url in seen:

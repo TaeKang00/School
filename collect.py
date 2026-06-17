@@ -184,17 +184,25 @@ def batch_analyze(university_name: str, items: list[dict]) -> list[dict]:
             print(f"    Gemini error: {e}")
             return []  # Gemini 응답은 왔지만 파싱 실패 → Groq 불필요
 
-    # 2차 fallback: Groq (llama-3.3-70b)
-    try:
-        resp = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.1,
-        )
-        return _parse_festivals(resp.choices[0].message.content)
-    except Exception as e:
-        print(f"    Groq error: {e}")
-        return []
+    # 2차 fallback: Groq llama-3.3-70b
+    for model in ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]:
+        try:
+            resp = groq_client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1,
+            )
+            return _parse_festivals(resp.choices[0].message.content)
+        except Exception as e:
+            err = str(e)
+            if "429" in err or "rate_limit" in err:
+                print(f"    Groq {model} 한도 초과 → 다음 모델 시도")
+            else:
+                print(f"    Groq {model} error: {e}")
+                return []
+
+    print(f"    모든 AI 한도 초과, skip")
+    return []
 
 
 def upsert(university: dict, items: list[dict], festivals: list[dict]):

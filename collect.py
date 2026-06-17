@@ -9,8 +9,8 @@ from google import genai
 SUPABASE_URL = "https://kxtyoopunnwxjhvtxbca.supabase.co"
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt4dHlvb3B1bm53eGpodnR4YmNhIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3ODMyNjg3NSwiZXhwIjoyMDkzOTAyODc1fQ.-KK3F_62XnVI1Fl_VpSK5oI5irMznZu4sdaXkFPZ_f8"
 GEMINI_API_KEY = "AIzaSyCfMmaJ7k58qtgwCUZiSo83EHI26VYGTCA"
-NAVER_CLIENT_ID = "ZMCGvUd9yOl8MTAOpE7n"
-NAVER_CLIENT_SECRET = "XskOZ3kD5L"
+NAVER_CLIENT_ID = "kUOU2mpqPg2jbVhA9YfG"
+NAVER_CLIENT_SECRET = "eG0JTp8U2L"
 
 gemini = genai.Client(api_key=GEMINI_API_KEY)
 

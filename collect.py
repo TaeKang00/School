@@ -1,26 +1,27 @@
-import os
 import json
 import hashlib
 import re
 import time
 import requests
 import feedparser
-from supabase import create_client, Client
 import google.generativeai as genai
 
 SUPABASE_URL = "https://kxtyoopunnwxjhvtxbca.supabase.co"
-SUPABASE_SERVICE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt4dHlvb3B1bm53eGpodnR4YmNhIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3ODMyNjg3NSwiZXhwIjoyMDkzOTAyODc1fQ.-KK3F_62XnVI1Fl_VpSK5oI5irMznZu4sdaXkFPZ_f8"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt4dHlvb3B1bm53eGpodnR4YmNhIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3ODMyNjg3NSwiZXhwIjoyMDkzOTAyODc1fQ.-KK3F_62XnVI1Fl_VpSK5oI5irMznZu4sdaXkFPZ_f8"
 GEMINI_API_KEY = "AIzaSyCfMmaJ7k58qtgwCUZiSo83EHI26VYGTCA"
 NAVER_CLIENT_ID = "ZMCGvUd9yOl8MTAOpE7n"
 NAVER_CLIENT_SECRET = "XskOZ3kD5L"
 
-print(f"[debug] url={repr(SUPABASE_URL[:30])} key={repr(SUPABASE_SERVICE_KEY[:20])}")
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 genai.configure(api_key=GEMINI_API_KEY)
 gemini = genai.GenerativeModel("gemini-2.0-flash")
 
 RSSHUB_BASE = "https://rsshub.app/instagram/user"
 NAVER_NEWS_URL = "https://openapi.naver.com/v1/search/news.json"
+SB_HEADERS = {
+    "apikey": SUPABASE_KEY,
+    "Authorization": f"Bearer {SUPABASE_KEY}",
+    "Content-Type": "application/json",
+}
 
 EXTRACT_PROMPT = """\
 한국 대학교 축제 뉴스/게시물입니다.
@@ -44,18 +45,29 @@ EXTRACT_PROMPT = """\
 """
 
 
-def naver_news(query: str) -> list[dict]:
+def sb_get(table: str, params: dict) -> list:
+    r = requests.get(f"{SUPABASE_URL}/rest/v1/{table}", headers=SB_HEADERS, params=params, timeout=15)
+    r.raise_for_status()
+    return r.json()
+
+
+def sb_upsert(table: str, row: dict):
+    headers = {**SB_HEADERS, "Prefer": "resolution=merge-duplicates,return=minimal"}
+    r = requests.post(f"{SUPABASE_URL}/rest/v1/{table}", headers=headers, json=row, timeout=15)
+    r.raise_for_status()
+
+
+def naver_news(query: str) -> list:
     headers = {
         "X-Naver-Client-Id": NAVER_CLIENT_ID,
         "X-Naver-Client-Secret": NAVER_CLIENT_SECRET,
     }
-    params = {"query": query, "sort": "date", "display": 10}
     try:
-        r = requests.get(NAVER_NEWS_URL, headers=headers, params=params, timeout=10)
+        r = requests.get(NAVER_NEWS_URL, headers=headers, params={"query": query, "sort": "date", "display": 10}, timeout=10)
         if r.status_code == 200:
             return r.json().get("items", [])
     except Exception as e:
-        print(f"    Naver API error ({query}): {e}")
+        print(f"    Naver error ({query}): {e}")
     return []
 
 
@@ -78,17 +90,12 @@ def analyze(university_name: str, content: str) -> dict | None:
     try:
         resp = gemini.generate_content(prompt)
         raw = resp.text.strip()
-        # Gemini가 코드블록으로 감싸는 경우 처리
         raw = re.sub(r"^```(?:json)?\n?", "", raw)
-        raw = re.sub(r"\n?```$", "", raw)
-        raw = raw.strip()
+        raw = re.sub(r"\n?```$", "", raw).strip()
         if raw == "null":
             return None
         data = json.loads(raw)
-        # date_start 없으면 의미없는 데이터
-        if not data.get("date_start"):
-            return None
-        return data
+        return data if data.get("date_start") else None
     except Exception as e:
         print(f"    Gemini error: {e}")
         return None
@@ -100,14 +107,11 @@ def make_hash(source_url: str, university_name: str, content: str) -> str:
 
 
 def to_semester(date_str: str) -> str:
-    """'YYYY-MM-DD' → '2026-1' or '2026-2'"""
     year, month = int(date_str[:4]), int(date_str[5:7])
-    half = 1 if month <= 6 else 2
-    return f"{year}-{half}"
+    return f"{year}-{1 if month <= 6 else 2}"
 
 
 def upsert(university: dict, source_url: str, source_name: str, content: str, analysis: dict):
-    scraped_hash = make_hash(source_url, university["name"], content)
     row = {
         "university_id": university["id"],
         "university_name": university["name"],
@@ -121,13 +125,13 @@ def upsert(university: dict, source_url: str, source_name: str, content: str, an
         "source_name": source_name,
         "status": "draft",
         "confidence": analysis.get("confidence"),
-        "scraped_hash": scraped_hash,
+        "scraped_hash": make_hash(source_url, university["name"], content),
     }
     try:
-        supabase.table("festivals").upsert(row, on_conflict="scraped_hash").execute()
+        sb_upsert("festivals", row)
         print(f"    saved: {analysis.get('festival_name') or '(이름미상)'} ({analysis['date_start']}, {row['semester']})")
     except Exception as e:
-        print(f"    DB upsert error: {e}")
+        print(f"    DB error: {e}")
 
 
 def process(university: dict):
@@ -135,7 +139,6 @@ def process(university: dict):
     print(f"\n[{name}]")
     seen: set[str] = set()
 
-    # 네이버 뉴스 3가지 쿼리
     for query in [f"{name} 축제", f"{name} 축제 라인업", f"{name} 대동제"]:
         for item in naver_news(query):
             url = item.get("link", "")
@@ -146,9 +149,8 @@ def process(university: dict):
             result = analyze(name, content)
             if result:
                 upsert(university, url, "네이버뉴스", content, result)
-            time.sleep(0.3)  # Gemini RPM 여유
+            time.sleep(0.3)
 
-    # Instagram RSS (핸들이 있을 때만)
     handle = university.get("instagram_handle")
     if handle:
         for post in instagram_posts(handle):
@@ -167,7 +169,7 @@ def process(university: dict):
 
 def main():
     print("=== Festival Collector Start ===")
-    unis = supabase.table("universities").select("*").eq("is_active", True).execute().data
+    unis = sb_get("universities", {"is_active": "eq.true", "select": "*"})
     print(f"Active universities: {len(unis)}")
 
     for uni in unis:

@@ -98,6 +98,13 @@ def make_hash(source_url: str, university_name: str, content: str) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
+def to_semester(date_str: str) -> str:
+    """'YYYY-MM-DD' → '2026-1' or '2026-2'"""
+    year, month = int(date_str[:4]), int(date_str[5:7])
+    half = 1 if month <= 6 else 2
+    return f"{year}-{half}"
+
+
 def upsert(university: dict, source_url: str, source_name: str, content: str, analysis: dict):
     scraped_hash = make_hash(source_url, university["name"], content)
     row = {
@@ -108,6 +115,7 @@ def upsert(university: dict, source_url: str, source_name: str, content: str, an
         "date_end": analysis.get("date_end"),
         "location": analysis.get("location"),
         "lineup": analysis.get("lineup") or [],
+        "semester": to_semester(analysis["date_start"]),
         "source_url": source_url,
         "source_name": source_name,
         "status": "draft",
@@ -116,7 +124,7 @@ def upsert(university: dict, source_url: str, source_name: str, content: str, an
     }
     try:
         supabase.table("festivals").upsert(row, on_conflict="scraped_hash").execute()
-        print(f"    saved: {analysis.get('festival_name') or '(이름미상)'} ({analysis['date_start']})")
+        print(f"    saved: {analysis.get('festival_name') or '(이름미상)'} ({analysis['date_start']}, {row['semester']})")
     except Exception as e:
         print(f"    DB upsert error: {e}")
 

@@ -26,27 +26,30 @@ SB_HEADERS = {
     "Content-Type": "application/json",
 }
 
-TARGET_SEMESTER = "2026-1"  # 수집 대상 학기
+TARGET_SEMESTER = "2026-1"
 
+# 대학 1개당 Gemini 1번 호출 — 수집한 모든 항목을 한 번에 분석
 EXTRACT_PROMPT = """\
-한국 대학교 축제 뉴스/게시물입니다.
-대학교: {university_name}
+아래는 {university_name}의 2026년 축제 관련 수집 결과입니다. 번호가 매겨져 있습니다.
 
-내용:
 {content}
 
-위 내용에서 2026년 1학기(1~6월) 축제 정보를 추출해 JSON으로만 반환하세요.
-이미 지난 축제도 포함합니다. 2026년 1학기 축제가 아니거나 날짜를 알 수 없으면 null을 반환하세요.
+위 내용에서 2026년 1학기(1~6월) 축제 정보를 추출해 JSON 배열로만 반환하세요.
+이미 지난 축제도 포함합니다. 정보가 없으면 빈 배열 []을 반환하세요.
 
-반환 형식 (JSON만, 마크다운 코드블록 없이):
-{{
-  "festival_name": "축제명 또는 null",
-  "date_start": "YYYY-MM-DD 또는 null",
-  "date_end": "YYYY-MM-DD 또는 null",
-  "location": "장소 또는 null",
-  "lineup": ["아티스트1", "아티스트2"],
-  "confidence": 0.0~1.0
-}}
+반환 형식 (JSON 배열만, 마크다운 코드블록 없이):
+[
+  {{
+    "festival_name": "축제명 또는 null",
+    "date_start": "YYYY-MM-DD 또는 null",
+    "date_end": "YYYY-MM-DD 또는 null",
+    "location": "장소 또는 null",
+    "lineup": ["아티스트1", "아티스트2"],
+    "source_index": 0,
+    "confidence": 0.0
+  }}
+]
+source_index는 해당 정보를 찾은 항목의 번호(0부터 시작)입니다.
 """
 
 
@@ -71,9 +74,9 @@ def naver_search(url: str, query: str) -> list:
         r = requests.get(url, headers=headers, params={"query": query, "sort": "date", "display": 10}, timeout=10)
         if r.status_code == 200:
             return r.json().get("items", [])
-        print(f"    Naver {r.status_code}: {r.text[:100]}")
+        print(f"    Naver {r.status_code}: {r.text[:80]}")
     except Exception as e:
-        print(f"    Naver error ({query}): {e}")
+        print(f"    Naver error: {e}")
     return []
 
 
@@ -90,27 +93,10 @@ def strip_html(text: str) -> str:
     return re.sub(r"<[^>]+>", "", text).strip()
 
 
-def analyze(university_name: str, content: str, debug: bool = False) -> dict | None:
-    content = strip_html(content)[:3000]
-    prompt = EXTRACT_PROMPT.format(university_name=university_name, content=content)
-    try:
-        resp = gemini.models.generate_content(model="gemini-2.0-flash", contents=prompt)
-        raw = resp.text.strip()
-        if debug:
-            print(f"  [debug] Gemini 응답: {raw[:100]}")
-        raw = re.sub(r"^```(?:json)?\n?", "", raw)
-        raw = re.sub(r"\n?```$", "", raw).strip()
-        if raw == "null":
-            return None
-        data = json.loads(raw)
-        if not data.get("date_start"):
-            return None
-        if to_semester(data["date_start"]) != TARGET_SEMESTER:
-            return None
-        return data
-    except Exception as e:
-        print(f"    Gemini error: {e}")
-        return None
+def to_semester(date_str: str) -> str:
+    from datetime import date
+    d = date.fromisoformat(date_str[:10])
+    return f"{d.year}-{1 if d.month <= 6 else 2}"
 
 
 def make_hash(source_url: str, university_name: str, content: str) -> str:
@@ -118,58 +104,88 @@ def make_hash(source_url: str, university_name: str, content: str) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
-def to_semester(date_str: str) -> str:
-    from datetime import date
-    d = date.fromisoformat(date_str[:10])
-    return f"{d.year}-{1 if d.month <= 6 else 2}"
+def batch_analyze(university_name: str, items: list[dict]) -> list[dict]:
+    """items: [{"url": ..., "source_name": ..., "content": ...}]
+    Gemini 1번 호출로 전체 분석 후 유효한 축제 목록 반환"""
+    if not items:
+        return []
 
+    numbered = "\n\n".join(
+        f"[{i}] {strip_html(item['content'])[:300]}" for i, item in enumerate(items)
+    )
+    prompt = EXTRACT_PROMPT.format(university_name=university_name, content=numbered)
 
-def upsert(university: dict, source_url: str, source_name: str, content: str, analysis: dict):
-    row = {
-        "university_id": university["id"],
-        "university_name": university["name"],
-        "festival_name": analysis.get("festival_name"),
-        "date_start": analysis["date_start"],
-        "date_end": analysis.get("date_end"),
-        "location": analysis.get("location"),
-        "lineup": analysis.get("lineup") or [],
-        "semester": to_semester(analysis["date_start"]),
-        "source_url": source_url,
-        "source_name": source_name,
-        "status": "draft",
-        "confidence": analysis.get("confidence"),
-        "scraped_hash": make_hash(source_url, university["name"], content),
-    }
     try:
-        sb_upsert("festivals", row, on_conflict="scraped_hash")
-        print(f"    saved: {analysis.get('festival_name') or '(이름미상)'} ({analysis['date_start']}, {row['semester']})")
+        resp = gemini.models.generate_content(model="gemini-2.0-flash", contents=prompt)
+        raw = resp.text.strip()
+        raw = re.sub(r"^```(?:json)?\n?", "", raw)
+        raw = re.sub(r"\n?```$", "", raw).strip()
+        results = json.loads(raw)
+        if not isinstance(results, list):
+            return []
+        valid = []
+        for r in results:
+            if not r.get("date_start"):
+                continue
+            try:
+                if to_semester(r["date_start"]) != TARGET_SEMESTER:
+                    continue
+            except Exception:
+                continue
+            valid.append(r)
+        return valid
     except Exception as e:
-        print(f"    DB error: {e}")
+        print(f"    Gemini error: {e}")
+        return []
 
 
-def process(university: dict, debug: bool = False):
+def upsert(university: dict, items: list[dict], festivals: list[dict]):
+    for festival in festivals:
+        idx = festival.get("source_index", 0)
+        item = items[idx] if 0 <= idx < len(items) else items[0]
+        row = {
+            "university_id": university["id"],
+            "university_name": university["name"],
+            "festival_name": festival.get("festival_name"),
+            "date_start": festival["date_start"],
+            "date_end": festival.get("date_end"),
+            "location": festival.get("location"),
+            "lineup": festival.get("lineup") or [],
+            "semester": to_semester(festival["date_start"]),
+            "source_url": item["url"],
+            "source_name": item["source_name"],
+            "status": "draft",
+            "confidence": festival.get("confidence"),
+            "scraped_hash": make_hash(item["url"], university["name"], item["content"]),
+        }
+        try:
+            sb_upsert("festivals", row, on_conflict="scraped_hash")
+            print(f"    saved: {festival.get('festival_name') or '(이름미상)'} ({festival['date_start']}, {row['semester']})")
+        except Exception as e:
+            print(f"    DB error: {e}")
+
+
+def process(university: dict):
     name = university["name"]
-    print(f"\n[{name}]")
+    print(f"\n[{name}]", end=" ", flush=True)
     seen: set[str] = set()
+    items: list[dict] = []
 
+    # 네이버 검색 (3쿼리 × 3소스)
     for query in [f"{name} 축제", f"{name} 대동제", f"{name} 축제 라인업"]:
         for source_name, source_url in NAVER_SOURCES.items():
-            items = naver_search(source_url, query)
-            if debug:
-                print(f"  [debug] '{query}' ({source_name}) → {len(items)}건")
-            for item in items:
+            for item in naver_search(source_url, query):
                 url = item.get("link", "")
                 if not url or url in seen:
                     continue
                 seen.add(url)
-                content = f"{item.get('title', '')}\n{item.get('description', '')}"
-                if debug:
-                    print(f"  [debug] 분석: {strip_html(item.get('title', ''))[:50]}")
-                result = analyze(name, content, debug=debug)
-                if result:
-                    upsert(university, url, source_name, content, result)
-                time.sleep(0.3)
+                items.append({
+                    "url": url,
+                    "source_name": source_name,
+                    "content": f"{item.get('title', '')}\n{item.get('description', '')}",
+                })
 
+    # Instagram RSS
     handle = university.get("instagram_handle")
     if handle:
         for post in instagram_posts(handle):
@@ -178,12 +194,21 @@ def process(university: dict, debug: bool = False):
                 continue
             seen.add(url)
             content = strip_html(post.get("summary", "") or post.get("title", ""))
-            if not content:
-                continue
-            result = analyze(name, content)
-            if result:
-                upsert(university, url, "Instagram", content, result)
-            time.sleep(0.3)
+            if content:
+                items.append({"url": url, "source_name": "Instagram", "content": content})
+
+    print(f"수집 {len(items)}건", flush=True)
+
+    if not items:
+        return
+
+    festivals = batch_analyze(name, items)
+    if festivals:
+        upsert(university, items, festivals)
+    else:
+        print(f"    축제 정보 없음")
+
+    time.sleep(4)  # Gemini 15 RPM 제한 (60s/15 = 4s)
 
 
 def main():
@@ -191,9 +216,9 @@ def main():
     unis = sb_get("universities", {"is_active": "eq.true", "select": "*"})
     print(f"Active universities: {len(unis)}")
 
-    for i, uni in enumerate(unis):
+    for uni in unis:
         try:
-            process(uni, debug=(i < 3))
+            process(uni)
         except Exception as e:
             print(f"  [ERROR] {uni['name']}: {e}")
 

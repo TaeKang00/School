@@ -4,7 +4,7 @@ import re
 import time
 import requests
 import feedparser
-import google.generativeai as genai
+from google import genai
 
 SUPABASE_URL = "https://kxtyoopunnwxjhvtxbca.supabase.co"
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt4dHlvb3B1bm53eGpodnR4YmNhIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3ODMyNjg3NSwiZXhwIjoyMDkzOTAyODc1fQ.-KK3F_62XnVI1Fl_VpSK5oI5irMznZu4sdaXkFPZ_f8"
@@ -12,8 +12,7 @@ GEMINI_API_KEY = "AIzaSyCfMmaJ7k58qtgwCUZiSo83EHI26VYGTCA"
 NAVER_CLIENT_ID = "ZMCGvUd9yOl8MTAOpE7n"
 NAVER_CLIENT_SECRET = "XskOZ3kD5L"
 
-genai.configure(api_key=GEMINI_API_KEY)
-gemini = genai.GenerativeModel("gemini-2.0-flash")
+gemini = genai.Client(api_key=GEMINI_API_KEY)
 
 RSSHUB_BASE = "https://rsshub.app/instagram/user"
 NAVER_NEWS_URL = "https://openapi.naver.com/v1/search/news.json"
@@ -86,12 +85,14 @@ def strip_html(text: str) -> str:
     return re.sub(r"<[^>]+>", "", text).strip()
 
 
-def analyze(university_name: str, content: str) -> dict | None:
+def analyze(university_name: str, content: str, debug: bool = False) -> dict | None:
     content = strip_html(content)[:3000]
     prompt = EXTRACT_PROMPT.format(university_name=university_name, content=content)
     try:
-        resp = gemini.generate_content(prompt)
+        resp = gemini.models.generate_content(model="gemini-2.0-flash", contents=prompt)
         raw = resp.text.strip()
+        if debug:
+            print(f"  [debug] Gemini 응답: {raw[:100]}")
         raw = re.sub(r"^```(?:json)?\n?", "", raw)
         raw = re.sub(r"\n?```$", "", raw).strip()
         if raw == "null":
@@ -140,20 +141,25 @@ def upsert(university: dict, source_url: str, source_name: str, content: str, an
         print(f"    DB error: {e}")
 
 
-def process(university: dict):
+def process(university: dict, debug: bool = False):
     name = university["name"]
     print(f"\n[{name}]")
     seen: set[str] = set()
 
     year = TARGET_SEMESTER.split("-")[0]
     for query in [f"{name} {year} 축제", f"{name} {year} 대동제", f"{name} {year} 축제 라인업"]:
-        for item in naver_news(query):
+        items = naver_news(query)
+        if debug:
+            print(f"  [debug] '{query}' → {len(items)}건")
+        for item in items:
             url = item.get("link", "")
             if not url or url in seen:
                 continue
             seen.add(url)
             content = f"{item.get('title', '')}\n{item.get('description', '')}"
-            result = analyze(name, content)
+            if debug:
+                print(f"  [debug] 분석: {strip_html(item.get('title', ''))[:50]}")
+            result = analyze(name, content, debug=debug)
             if result:
                 upsert(university, url, "네이버뉴스", content, result)
             time.sleep(0.3)
@@ -179,9 +185,9 @@ def main():
     unis = sb_get("universities", {"is_active": "eq.true", "select": "*"})
     print(f"Active universities: {len(unis)}")
 
-    for uni in unis:
+    for i, uni in enumerate(unis):
         try:
-            process(uni)
+            process(uni, debug=(i < 3))
         except Exception as e:
             print(f"  [ERROR] {uni['name']}: {e}")
 

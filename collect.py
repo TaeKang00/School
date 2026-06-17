@@ -198,6 +198,7 @@ def batch_analyze(university_name: str, items: list[dict]) -> list[dict]:
 
 
 def upsert(university: dict, items: list[dict], festivals: list[dict]):
+    saved = []
     for festival in festivals:
         idx = festival.get("source_index", 0)
         item = items[idx] if 0 <= idx < len(items) else items[0]
@@ -220,13 +221,16 @@ def upsert(university: dict, items: list[dict], festivals: list[dict]):
         }
         try:
             sb_upsert("festivals", row, on_conflict="scraped_hash")
-            date_range = festival.get("date_start") or "날짜미상"
-            if festival.get("date_end"):
-                date_range += f" ~ {festival['date_end']}"
-            lineup_str = ", ".join(festival.get("lineup") or []) or "미확인"
-            print(f"    {date_range} | 라인업: {lineup_str}")
+            saved.append(festival)
         except Exception as e:
             print(f"    DB error: {e}")
+
+    if saved:
+        # confidence 높고 라인업 많은 것 1개만 출력
+        best = max(saved, key=lambda f: (f.get("confidence") or 0, len(f.get("lineup") or [])))
+        date_range = f"{best['date_start']} ~ {best['date_end']}"
+        lineup_str = ", ".join(best.get("lineup") or []) or "미확인"
+        print(f"    → {date_range} | 라인업: {lineup_str}")
 
 
 def process(university: dict):

@@ -14,6 +14,7 @@ GEMINI_API_KEY = "AIzaSyCfMmaJ7k58qtgwCUZiSo83EHI26VYGTCA"
 NAVER_CLIENT_ID = "ZMCGvUd9yOl8MTAOpE7n"
 NAVER_CLIENT_SECRET = "XskOZ3kD5L"
 
+print(f"[debug] url={repr(SUPABASE_URL[:30])} key={repr(SUPABASE_SERVICE_KEY[:20])}")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 genai.configure(api_key=GEMINI_API_KEY)
 gemini = genai.GenerativeModel("gemini-2.0-flash")

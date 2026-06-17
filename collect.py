@@ -227,7 +227,7 @@ def process(university: dict):
     if not items:
         return
 
-    festivals = batch_analyze(name, items)
+    festivals = batch_analyze(name, items[:30])  # 토큰 한도 대비 상위 30건만 분석
     if festivals:
         upsert(university, items, festivals)
     else:

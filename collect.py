@@ -277,8 +277,22 @@ def process(university: dict):
 
 
 
+def clear_drafts():
+    """현재 학기의 draft 데이터 삭제 (published/rejected는 유지)"""
+    headers = {**SB_HEADERS}
+    r = requests.delete(
+        f"{SUPABASE_URL}/rest/v1/festivals",
+        headers=headers,
+        params={"semester": f"eq.{TARGET_SEMESTER}", "status": "eq.draft"},
+        timeout=15,
+    )
+    r.raise_for_status()
+    print(f"기존 draft 삭제 완료 ({TARGET_SEMESTER})")
+
+
 def main():
     print("=== Festival Collector Start ===")
+    clear_drafts()
     unis = sb_get("universities", {"is_active": "eq.true", "select": "*"})
     print(f"Active universities: {len(unis)}")
 

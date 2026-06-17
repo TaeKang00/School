@@ -52,9 +52,9 @@ def sb_get(table: str, params: dict) -> list:
     return r.json()
 
 
-def sb_upsert(table: str, row: dict):
+def sb_upsert(table: str, row: dict, on_conflict: str = "id"):
     headers = {**SB_HEADERS, "Prefer": "resolution=merge-duplicates,return=minimal"}
-    r = requests.post(f"{SUPABASE_URL}/rest/v1/{table}", headers=headers, json=row, timeout=15)
+    r = requests.post(f"{SUPABASE_URL}/rest/v1/{table}?on_conflict={on_conflict}", headers=headers, json=row, timeout=15)
     r.raise_for_status()
 
 
@@ -114,8 +114,9 @@ def make_hash(source_url: str, university_name: str, content: str) -> str:
 
 
 def to_semester(date_str: str) -> str:
-    year, month = int(date_str[:4]), int(date_str[5:7])
-    return f"{year}-{1 if month <= 6 else 2}"
+    from datetime import date
+    d = date.fromisoformat(date_str[:10])
+    return f"{d.year}-{1 if d.month <= 6 else 2}"
 
 
 def upsert(university: dict, source_url: str, source_name: str, content: str, analysis: dict):
@@ -135,7 +136,7 @@ def upsert(university: dict, source_url: str, source_name: str, content: str, an
         "scraped_hash": make_hash(source_url, university["name"], content),
     }
     try:
-        sb_upsert("festivals", row)
+        sb_upsert("festivals", row, on_conflict="scraped_hash")
         print(f"    saved: {analysis.get('festival_name') or '(이름미상)'} ({analysis['date_start']}, {row['semester']})")
     except Exception as e:
         print(f"    DB error: {e}")

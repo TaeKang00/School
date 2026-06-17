@@ -147,8 +147,7 @@ def process(university: dict, debug: bool = False):
     print(f"\n[{name}]")
     seen: set[str] = set()
 
-    year = TARGET_SEMESTER.split("-")[0]
-    for query in [f"{name} {year} 축제", f"{name} {year} 대동제", f"{name} {year} 축제 라인업"]:
+    for query in [f"{name} 축제", f"{name} 대동제", f"{name} 축제 라인업"]:
         items = naver_news(query)
         if debug:
             print(f"  [debug] '{query}' → {len(items)}건")

@@ -115,13 +115,26 @@ def _parse_festivals(raw: str) -> list[dict]:
         return []
     valid = []
     for r in results:
-        if not r.get("date_start"):
+        has_lineup = bool(r.get("lineup"))
+        has_date = bool(r.get("date_start"))
+
+        # 날짜 있으면 학기 검증
+        if has_date:
+            try:
+                if to_semester(r["date_start"]) != TARGET_SEMESTER:
+                    continue
+            except Exception:
+                r["date_start"] = None
+                has_date = False
+
+        # 날짜도 없고 라인업도 없으면 버림
+        if not has_date and not has_lineup:
             continue
-        try:
-            if to_semester(r["date_start"]) != TARGET_SEMESTER:
-                continue
-        except Exception:
-            continue
+
+        # 날짜 없지만 라인업 있으면 학기만 채워서 저장
+        if not has_date:
+            r["date_start"] = None
+
         valid.append(r)
     return valid
 
@@ -164,15 +177,17 @@ def upsert(university: dict, items: list[dict], festivals: list[dict]):
     for festival in festivals:
         idx = festival.get("source_index", 0)
         item = items[idx] if 0 <= idx < len(items) else items[0]
+        date_start = festival.get("date_start")
+        semester = to_semester(date_start) if date_start else TARGET_SEMESTER
         row = {
             "university_id": university["id"],
             "university_name": university["name"],
             "festival_name": festival.get("festival_name"),
-            "date_start": festival["date_start"],
+            "date_start": date_start,
             "date_end": festival.get("date_end"),
             "location": festival.get("location"),
             "lineup": festival.get("lineup") or [],
-            "semester": to_semester(festival["date_start"]),
+            "semester": semester,
             "source_url": item["url"],
             "source_name": item["source_name"],
             "status": "draft",
@@ -181,7 +196,7 @@ def upsert(university: dict, items: list[dict], festivals: list[dict]):
         }
         try:
             sb_upsert("festivals", row, on_conflict="scraped_hash")
-            date_range = festival["date_start"]
+            date_range = festival.get("date_start") or "날짜미상"
             if festival.get("date_end"):
                 date_range += f" ~ {festival['date_end']}"
             lineup_str = ", ".join(festival.get("lineup") or []) or "미확인"
@@ -196,8 +211,14 @@ def process(university: dict):
     seen: set[str] = set()
     items: list[dict] = []
 
-    # 네이버 검색 (3쿼리 × 3소스)
-    for query in [f"{name} 축제", f"{name} 대동제", f"{name} 축제 라인업"]:
+    # 검색 쿼리 구성 (festival_hint 있으면 추가)
+    hint = university.get("festival_hint")
+    queries = [f"{name} 축제", f"{name} 대동제", f"{name} 축제 라인업"]
+    if hint:
+        queries += [hint, f"{hint} 라인업", f"{hint} 날짜"]
+
+    # 네이버 검색
+    for query in queries:
         for source_name, source_url in NAVER_SOURCES.items():
             for item in naver_search(source_url, query):
                 url = item.get("link", "")

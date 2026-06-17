@@ -40,6 +40,19 @@ EXTRACT_PROMPT = """\
 위 내용에서 2026년 1학기(1~6월) 축제 정보를 추출해 JSON 배열로만 반환하세요.
 이미 지난 축제도 포함합니다. 정보가 없으면 빈 배열 []을 반환하세요.
 
+추출 규칙:
+- 날짜는 반드시 YYYY-MM-DD 형식. "5월 14일" → "2026-05-14"
+- 날짜 범위가 언급되면 date_start/date_end 모두 채울 것
+- 라인업은 실제 공연 아티스트 이름만. 사회자/MC 제외
+- confidence: 날짜+라인업 모두 확실하면 0.9, 하나만 있으면 0.6, 둘 다 불확실하면 0.3
+- 같은 축제가 여러 항목에 나오면 가장 정보가 많은 항목의 source_index 사용
+
+예시 입력:
+[0] 연세대 아카라카 2026 라인업 공개... 5월 21일~22일 신촌캠퍼스에서 개최. 아이유, 에스파 출연 확정
+
+예시 출력:
+[{{"festival_name":"아카라카","date_start":"2026-05-21","date_end":"2026-05-22","location":"신촌캠퍼스","lineup":["아이유","에스파"],"source_index":0,"confidence":0.9}}]
+
 반환 형식 (JSON 배열만, 마크다운 코드블록 없이):
 [
   {{
@@ -54,6 +67,8 @@ EXTRACT_PROMPT = """\
 ]
 source_index는 해당 정보를 찾은 항목의 번호(0부터 시작)입니다.
 """
+
+CONFIDENCE_THRESHOLD = 0.5  # 이 미만은 저장 안 함
 
 
 def sb_get(table: str, params: dict) -> list:
@@ -126,6 +141,10 @@ def _parse_festivals(raw: str) -> list[dict]:
             except Exception:
                 r["date_start"] = None
                 has_date = False
+
+        # confidence 임계값 미만 버림
+        if r.get("confidence", 0) < CONFIDENCE_THRESHOLD:
+            continue
 
         # 날짜도 없고 라인업도 없으면 버림
         if not has_date and not has_lineup:

@@ -140,10 +140,12 @@ def batch_analyze(university_name: str, items: list[dict]) -> list[dict]:
         resp = gemini.models.generate_content(model="gemini-2.0-flash", contents=prompt)
         return _parse_festivals(resp.text)
     except Exception as e:
-        if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+        err = str(e)
+        if "429" in err or "RESOURCE_EXHAUSTED" in err:
             print(f"    Gemini 한도 초과 → Groq 전환")
         else:
             print(f"    Gemini error: {e}")
+            return []  # Gemini 응답은 왔지만 파싱 실패 → Groq 불필요
 
     # 2차 fallback: Groq (llama-3.3-70b)
     try:
@@ -231,7 +233,8 @@ def process(university: dict):
     else:
         print(f"    축제 정보 없음")
 
-    time.sleep(4)  # Gemini 15 RPM 제한 (60s/15 = 4s)
+    time.sleep(4)  # Gemini/Groq 15 RPM 제한 (60s/15 = 4s)
+
 
 
 def main():

@@ -5,14 +5,17 @@ import time
 import requests
 import feedparser
 from google import genai
+from groq import Groq
 
 SUPABASE_URL = "https://kxtyoopunnwxjhvtxbca.supabase.co"
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt4dHlvb3B1bm53eGpodnR4YmNhIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3ODMyNjg3NSwiZXhwIjoyMDkzOTAyODc1fQ.-KK3F_62XnVI1Fl_VpSK5oI5irMznZu4sdaXkFPZ_f8"
 GEMINI_API_KEY = "AIzaSyCfMmaJ7k58qtgwCUZiSo83EHI26VYGTCA"
+GROQ_API_KEY = "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"
 NAVER_CLIENT_ID = "kUOU2mpqPg2jbVhA9YfG"
 NAVER_CLIENT_SECRET = "eG0JTp8U2L"
 
 gemini = genai.Client(api_key=GEMINI_API_KEY)
+groq_client = Groq(api_key=GROQ_API_KEY)
 
 RSSHUB_BASE = "https://rsshub.app/instagram/user"
 NAVER_SOURCES = {
@@ -104,9 +107,26 @@ def make_hash(source_url: str, university_name: str, content: str) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
+def _parse_festivals(raw: str) -> list[dict]:
+    raw = re.sub(r"^```(?:json)?\n?", "", raw.strip())
+    raw = re.sub(r"\n?```$", "", raw).strip()
+    results = json.loads(raw)
+    if not isinstance(results, list):
+        return []
+    valid = []
+    for r in results:
+        if not r.get("date_start"):
+            continue
+        try:
+            if to_semester(r["date_start"]) != TARGET_SEMESTER:
+                continue
+        except Exception:
+            continue
+        valid.append(r)
+    return valid
+
+
 def batch_analyze(university_name: str, items: list[dict]) -> list[dict]:
-    """items: [{"url": ..., "source_name": ..., "content": ...}]
-    Gemini 1번 호출로 전체 분석 후 유효한 축제 목록 반환"""
     if not items:
         return []
 
@@ -115,27 +135,26 @@ def batch_analyze(university_name: str, items: list[dict]) -> list[dict]:
     )
     prompt = EXTRACT_PROMPT.format(university_name=university_name, content=numbered)
 
+    # 1차: Gemini
     try:
         resp = gemini.models.generate_content(model="gemini-2.0-flash", contents=prompt)
-        raw = resp.text.strip()
-        raw = re.sub(r"^```(?:json)?\n?", "", raw)
-        raw = re.sub(r"\n?```$", "", raw).strip()
-        results = json.loads(raw)
-        if not isinstance(results, list):
-            return []
-        valid = []
-        for r in results:
-            if not r.get("date_start"):
-                continue
-            try:
-                if to_semester(r["date_start"]) != TARGET_SEMESTER:
-                    continue
-            except Exception:
-                continue
-            valid.append(r)
-        return valid
+        return _parse_festivals(resp.text)
     except Exception as e:
-        print(f"    Gemini error: {e}")
+        if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+            print(f"    Gemini 한도 초과 → Groq 전환")
+        else:
+            print(f"    Gemini error: {e}")
+
+    # 2차 fallback: Groq (llama-3.3-70b)
+    try:
+        resp = groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1,
+        )
+        return _parse_festivals(resp.choices[0].message.content)
+    except Exception as e:
+        print(f"    Groq error: {e}")
         return []
 
 

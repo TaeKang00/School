@@ -15,7 +15,11 @@ NAVER_CLIENT_SECRET = "eG0JTp8U2L"
 gemini = genai.Client(api_key=GEMINI_API_KEY)
 
 RSSHUB_BASE = "https://rsshub.app/instagram/user"
-NAVER_NEWS_URL = "https://openapi.naver.com/v1/search/news.json"
+NAVER_SOURCES = {
+    "뉴스": "https://openapi.naver.com/v1/search/news.json",
+    "블로그": "https://openapi.naver.com/v1/search/blog.json",
+    "웹문서": "https://openapi.naver.com/v1/search/webkr.json",
+}
 SB_HEADERS = {
     "apikey": SUPABASE_KEY,
     "Authorization": f"Bearer {SUPABASE_KEY}",
@@ -58,15 +62,16 @@ def sb_upsert(table: str, row: dict, on_conflict: str = "id"):
     r.raise_for_status()
 
 
-def naver_news(query: str) -> list:
+def naver_search(url: str, query: str) -> list:
     headers = {
         "X-Naver-Client-Id": NAVER_CLIENT_ID,
         "X-Naver-Client-Secret": NAVER_CLIENT_SECRET,
     }
     try:
-        r = requests.get(NAVER_NEWS_URL, headers=headers, params={"query": query, "sort": "date", "display": 10}, timeout=10)
+        r = requests.get(url, headers=headers, params={"query": query, "sort": "date", "display": 10}, timeout=10)
         if r.status_code == 200:
             return r.json().get("items", [])
+        print(f"    Naver {r.status_code}: {r.text[:100]}")
     except Exception as e:
         print(f"    Naver error ({query}): {e}")
     return []
@@ -148,21 +153,22 @@ def process(university: dict, debug: bool = False):
     seen: set[str] = set()
 
     for query in [f"{name} 축제", f"{name} 대동제", f"{name} 축제 라인업"]:
-        items = naver_news(query)
-        if debug:
-            print(f"  [debug] '{query}' → {len(items)}건")
-        for item in items:
-            url = item.get("link", "")
-            if not url or url in seen:
-                continue
-            seen.add(url)
-            content = f"{item.get('title', '')}\n{item.get('description', '')}"
+        for source_name, source_url in NAVER_SOURCES.items():
+            items = naver_search(source_url, query)
             if debug:
-                print(f"  [debug] 분석: {strip_html(item.get('title', ''))[:50]}")
-            result = analyze(name, content, debug=debug)
-            if result:
-                upsert(university, url, "네이버뉴스", content, result)
-            time.sleep(0.3)
+                print(f"  [debug] '{query}' ({source_name}) → {len(items)}건")
+            for item in items:
+                url = item.get("link", "")
+                if not url or url in seen:
+                    continue
+                seen.add(url)
+                content = f"{item.get('title', '')}\n{item.get('description', '')}"
+                if debug:
+                    print(f"  [debug] 분석: {strip_html(item.get('title', ''))[:50]}")
+                result = analyze(name, content, debug=debug)
+                if result:
+                    upsert(university, url, source_name, content, result)
+                time.sleep(0.3)
 
     handle = university.get("instagram_handle")
     if handle:

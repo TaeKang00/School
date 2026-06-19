@@ -1,8 +1,6 @@
 name: Festival Data Collector
 
 on:
-  schedule:
-    - cron: '0 15 * * *'   # 매일 자정 KST (UTC 15:00)
   workflow_dispatch:
 
 env:
